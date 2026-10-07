@@ -1,12 +1,22 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.env import port
 from app.routes import router
+from app.services import scheduler
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    scheduler.start()
+    yield
+    scheduler.shutdown()
 
 
 def create_app() -> FastAPI:
-    app = FastAPI()
+    app = FastAPI(lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173"],

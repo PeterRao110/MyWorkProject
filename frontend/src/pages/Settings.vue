@@ -9,12 +9,22 @@ import {
   testDatabaseSettings,
 } from "@/services/settings";
 
-type SectionId = "database" | "akshare" | "tushare";
+type SectionId = "database" | "akshare" | "tushare" | "futures";
 
 const sections: { id: SectionId; label: string; desc: string }[] = [
   { id: "database", label: "数据库连接", desc: "保存后写入后端配置文件。密码不会回显，留空表示沿用已保存的密码。" },
   { id: "akshare", label: "AKShare", desc: "保存后写入配置文件。" },
-  { id: "tushare", label: "Tushare", desc: "保存后写入配置文件。RDS 和 ProMax 的 Token 不会回显，留空表示沿用已保存的值。" },
+  { id: "tushare", label: "Tushare", desc: "保存后写入配置文件。Tushare测试接口和 Tushare接口的 Token 不会回显，留空表示沿用已保存的值。" },
+  { id: "futures", label: "期货设置", desc: "" },
+];
+
+const exchanges = [
+  { name: "中国金融期货交易所", code: "CFFEX", suffix: ".CFX", home: "http://www.cffex.com.cn" },
+  { name: "上海期货交易所", code: "SHFE", suffix: ".SHF", home: "https://www.shfe.com.cn" },
+  { name: "上海国际能源交易中心", code: "INE", suffix: ".INE", home: "http://www.ine.cn" },
+  { name: "郑州商品交易所", code: "CZCE", suffix: ".ZCE", home: "http://www.czce.com.cn" },
+  { name: "大连商品交易所", code: "DCE", suffix: ".DCE", home: "http://www.dce.com.cn" },
+  { name: "广州期货交易所", code: "GFEX", suffix: ".GFEX", home: "http://www.gfex.com.cn" },
 ];
 
 const active = ref<SectionId>("database");
@@ -192,6 +202,12 @@ function validDatabase() {
           <path d="M4 12h.01" />
           <path d="M4 18h.01" />
         </svg>
+        <svg v-else-if="item.id === 'futures'" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 20V10" />
+          <path d="M10 20V4" />
+          <path d="M16 20v-7" />
+          <path d="M22 20H2" />
+        </svg>
         <svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 3v4" />
           <path d="M12 17v4" />
@@ -205,8 +221,8 @@ function validDatabase() {
 
     <article class="settings-panel">
       <header class="page-head">
-        <h1>{{ current.label }}</h1>
-        <p>{{ current.desc }}</p>
+        <h1>{{ active === "futures" ? "期货交易所设置" : current.label }}</h1>
+        <p v-if="current.desc">{{ current.desc }}</p>
       </header>
 
       <div v-if="active === 'database'" class="form-grid">
@@ -256,17 +272,38 @@ function validDatabase() {
         </label>
       </div>
 
-      <template v-else>
+      <div v-else-if="active === 'futures'" class="exchange-wrap">
+        <table class="exchange-table">
+          <thead>
+            <tr>
+              <th>交易所名称</th>
+              <th>交易所代码</th>
+              <th>合约后缀</th>
+              <th>首页地址</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in exchanges" :key="item.code">
+              <td>{{ item.name }}</td>
+              <td>{{ item.code }}</td>
+              <td>{{ item.suffix }}</td>
+              <td><a :href="item.home" target="_blank" rel="noreferrer">{{ item.home }}</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <template v-else-if="active === 'tushare'">
         <section class="settings-block">
-          <h2>RDS 接口</h2>
+          <h2>Tushare测试接口</h2>
           <div class="form-grid">
             <label class="wide">
               <span>Token</span>
-              <input v-model="rds.token" type="password" :placeholder="rdsTokenSet ? '已保存，留空则不修改' : '输入 RDS token'" autocomplete="off" />
+              <input v-model="rds.token" type="password" :placeholder="rdsTokenSet ? '已保存，留空则不修改' : '输入 Tushare测试接口 token'" autocomplete="off" />
             </label>
             <label class="wide">
               <span>接口地址</span>
-              <input v-model="rds.baseUrl" placeholder="RDS 接口地址" />
+              <input v-model="rds.baseUrl" placeholder="Tushare测试接口地址" />
             </label>
             <label>
               <span>超时时间（秒）</span>
@@ -280,15 +317,15 @@ function validDatabase() {
         </section>
 
         <section class="settings-block">
-          <h2>ProMax 接口</h2>
+          <h2>Tushare接口</h2>
           <div class="form-grid">
             <label class="wide">
               <span>Token</span>
-              <input v-model="promax.token" type="password" :placeholder="promaxTokenSet ? '已保存，留空则不修改' : '输入 ProMax token'" autocomplete="off" />
+              <input v-model="promax.token" type="password" :placeholder="promaxTokenSet ? '已保存，留空则不修改' : '输入 Tushare接口 token'" autocomplete="off" />
             </label>
             <label class="wide">
               <span>接口地址</span>
-              <input v-model="promax.baseUrl" placeholder="ProMax 接口地址" />
+              <input v-model="promax.baseUrl" placeholder="Tushare接口地址" />
             </label>
             <label>
               <span>超时时间（秒）</span>
@@ -302,7 +339,7 @@ function validDatabase() {
         </section>
       </template>
 
-      <div class="settings-actions">
+      <div v-if="active !== 'futures'" class="settings-actions">
         <button v-if="active === 'database'" class="secondary-btn" type="button" :disabled="busy" @click="testConnection">
           测试连接
         </button>

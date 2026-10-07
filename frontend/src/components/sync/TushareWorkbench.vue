@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watchEffect } from "vue";
+import { useRouter } from "vue-router";
 import ApiTree from "@/components/sync/ApiTree.vue";
 import { tushareCatalog } from "@/data/tushareCatalog";
 import { getSourceSettings, type SourceSettings } from "@/services/settings";
@@ -22,6 +23,7 @@ const codeOpen = ref(false);
 const codeText = ref("");
 const copyHint = ref("");
 const allBox = ref<HTMLInputElement | null>(null);
+const router = useRouter();
 
 const tokenReady = computed(() => Boolean(sources.value?.[source.value].tokenSet));
 const fieldState = computed(() => (schema.value ? checks[schema.value.docId] : undefined));
@@ -34,6 +36,13 @@ const allChecked = computed(
   () => Boolean(schema.value?.fields.length) && selectedFields.value.length === schema.value?.fields.length,
 );
 const docHref = computed(() => `https://tushare.pro/document/2?doc_id=${activeId.value}`);
+const warehouseRule = computed(() => {
+  if (schema.value?.apiName !== "fut_wsr") return "";
+  if (source.value === "rds") {
+    return "Tushare测试接口下 trade_date 和 symbol 不能都为空，填写其中一个即可；start_date、end_date、exchange 可以为空。";
+  }
+  return "Tushare接口下 trade_date 不能为空；symbol、start_date、end_date、exchange 可以为空。";
+});
 
 watchEffect(() => {
   if (!allBox.value || !schema.value) return;
@@ -44,7 +53,6 @@ onMounted(async () => {
   void loadSchema("135");
   try {
     sources.value = await getSourceSettings();
-    if (!sources.value.promax.tokenSet && sources.value.rds.tokenSet) source.value = "rds";
   } catch {
     sources.value = null;
   }
@@ -94,6 +102,10 @@ function collectParams() {
   return params;
 }
 
+function paramValue(name: string) {
+  return (drafts[draftKey(name)] || "").trim();
+}
+
 function validate() {
   if (!schema.value?.apiName) {
     show("请选择可调用的数据接口", false);
@@ -103,6 +115,20 @@ function validate() {
     if (param.required && !drafts[draftKey(param.name)]?.trim()) {
       show(`${param.name} 必填`, false);
       document.getElementById(`param-${param.name}`)?.focus();
+      return false;
+    }
+  }
+  if (schema.value.apiName === "fut_wsr") {
+    const tradeDate = paramValue("trade_date");
+    const symbol = paramValue("symbol");
+    if (source.value === "rds" && !tradeDate && !symbol) {
+      show("Tushare测试接口下 trade_date 和 symbol 不能都为空，至少填写一个", false);
+      document.getElementById("param-trade_date")?.focus();
+      return false;
+    }
+    if (source.value === "promax" && !tradeDate) {
+      show("Tushare接口下 trade_date 不能为空", false);
+      document.getElementById("param-trade_date")?.focus();
       return false;
     }
   }
@@ -187,6 +213,20 @@ function toggleAll(event: Event) {
   for (const field of schema.value.fields) state[field.name] = checked;
 }
 
+function saveAsJob() {
+  if (!schema.value?.apiName) return;
+  router.push({
+    name: "schedule",
+    query: {
+      create: "1",
+      docId: activeId.value,
+      source: source.value,
+      params: JSON.stringify(collectParams()),
+      fields: selectedFields.value.join(","),
+    },
+  });
+}
+
 function show(text: string, ok: boolean) {
   message.value = text;
   messageOk.value = ok;
@@ -216,6 +256,7 @@ function show(text: string, ok: boolean) {
           <p v-if="loading" class="pane-empty">正在读取接口说明</p>
           <p v-else-if="schema && !schema.params.length" class="pane-empty">这个节点没有入参，可以打开详细文档查看。</p>
           <div v-else-if="schema" class="param-list">
+            <p v-if="warehouseRule" class="param-rule">{{ warehouseRule }}</p>
             <div v-for="param in schema.params" :key="param.name" class="param-row">
               <span class="param-name">{{ param.name }}<em v-if="param.required">*</em></span>
               <input :id="`param-${param.name}`" v-model="drafts[draftKey(param.name)]" :aria-label="param.name" />
@@ -259,14 +300,15 @@ function show(text: string, ok: boolean) {
         <label class="tool-source">
           调用接口
           <select v-model="source" aria-label="调用接口">
-            <option value="rds">RDS</option>
-            <option value="promax">ProMax</option>
+            <option value="promax">Tushare接口</option>
+            <option value="rds">Tushare测试接口</option>
           </select>
         </label>
         <button type="button" class="run-btn" :disabled="running || !schema?.apiName" @click="runTest">
           {{ running ? "查询中..." : "运行测试" }}
         </button>
         <button type="button" class="ghost-btn" :disabled="!schema?.apiName" @click="generateCode">生成代码</button>
+        <button type="button" class="ghost-btn" :disabled="!schema?.apiName" @click="saveAsJob">存为定时任务</button>
         <a class="ghost-btn" :href="docHref" target="_blank" rel="noopener noreferrer">详细文档</a>
       </div>
       <p v-if="sources && schema && !tokenReady" class="tool-msg">当前接口还没有保存 Token，运行测试前请到系统设置填写。</p>

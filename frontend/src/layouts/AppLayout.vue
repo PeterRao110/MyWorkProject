@@ -11,6 +11,7 @@ const researchActive = computed(() => route.name === "research" || route.name ==
 watchEffect(() => {
   if (route.name === "market") document.title = "市场 · 投研";
   if (route.name === "sync") document.title = "数据同步 · 投研";
+  if (route.name === "schedule") document.title = "监控调度 · 投研";
   if (route.name === "settings") document.title = "系统设置 · 投研";
 });
 </script>
@@ -49,6 +50,13 @@ watchEffect(() => {
           </svg>
           <span>数据同步</span>
         </RouterLink>
+        <RouterLink to="/schedule" class="nav-link" active-class="active">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 3" />
+          </svg>
+          <span>监控调度</span>
+        </RouterLink>
         <RouterLink to="/settings" class="nav-link" active-class="active">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
@@ -63,7 +71,7 @@ watchEffect(() => {
       </div>
     </aside>
     <div class="workspace">
-      <header v-if="route.name !== 'sync'" class="topbar">
+      <header v-if="route.name !== 'sync' && route.name !== 'schedule'" class="topbar">
         <AppSearch />
       </header>
       <main class="main">

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import AppLayout from "@/layouts/AppLayout.vue";
 import Instrument from "@/pages/Instrument.vue";
 import Market from "@/pages/Market.vue";
+import Schedule from "@/pages/Schedule.vue";
 import Settings from "@/pages/Settings.vue";
 import Sync from "@/pages/Sync.vue";
 
@@ -17,6 +18,7 @@ export const router = createRouter({
         { path: "research", name: "research", component: Instrument },
         { path: "instrument/:code", name: "instrument", component: Instrument },
         { path: "sync", name: "sync", component: Sync },
+        { path: "schedule", name: "schedule", component: Schedule },
         { path: "settings", name: "settings", component: Settings },
       ],
     },

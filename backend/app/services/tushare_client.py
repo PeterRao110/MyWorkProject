@@ -8,7 +8,7 @@ from app.services.source_config import _stored
 DOC_URL = "https://tushare.pro/wctapi/documents/{doc_id}.md"
 DEFAULT_API = "http://api.tushare.pro"
 SOURCES = {"rds": "TUSHARE_RDS", "promax": "TUSHARE_PROMAX"}
-SOURCE_LABELS = {"rds": "RDS", "promax": "ProMax"}
+SOURCE_LABELS = {"rds": "Tushare测试接口", "promax": "Tushare接口"}
 _CACHE: dict[str, dict] = {}
 
 
@@ -28,12 +28,12 @@ def load_schema(doc_id: str) -> dict:
 def query_api(source: str, api_name: str, params: dict[str, str], fields: list[str]) -> dict:
     prefix = SOURCES.get(source)
     if prefix is None:
-        raise TushareError("请选择 RDS 或 ProMax 接口")
+        raise TushareError("请选择 Tushare接口或 Tushare测试接口")
     stored = _stored()
     token = stored.get(f"{prefix}_TOKEN", "").strip()
     if not token:
         label = SOURCE_LABELS[source]
-        raise TushareError(f"请先在系统设置中保存 Tushare {label} 接口的 Token")
+        raise TushareError(f"请先在系统设置中保存{label}的 Token")
     base_url = (stored.get(f"{prefix}_BASE_URL") or DEFAULT_API).strip() or DEFAULT_API
     timeout = _number(stored.get(f"{prefix}_TIMEOUT"), 30, 1, 120)
     retry = _number(stored.get(f"{prefix}_RETRY"), 1, 0, 5)
