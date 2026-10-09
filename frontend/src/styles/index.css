@@ -93,6 +93,50 @@ a { color: inherit; }
 .nav-link:hover { background: #f8fafc; }
 .nav-link.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
+.logout-btn {
+  margin: 8px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.logout-btn:hover { background: #f8fafc; color: var(--ink); }
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 28px 24px 24px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.login-card h1 { margin: 0; font-size: 28px; }
+.login-card p { margin: 0; color: var(--muted); }
+.login-card label { display: grid; gap: 6px; }
+.login-card label span { color: var(--muted); font-size: 12px; }
+
+.login-card input {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.login-card .primary-btn { width: 100%; }
+.login-card .mark { width: 42px; height: 42px; }
+
 .sidebar-foot {
   margin-top: auto;
   padding: 12px;
@@ -862,7 +906,15 @@ select {
   }
   .brand { padding: 0; }
   .nav { flex-direction: row; }
-  .sidebar-foot { display: none; }
+  .sidebar-foot {
+    display: block;
+    margin-top: 0;
+    margin-left: auto;
+    padding: 0;
+    background: transparent;
+    border: 0;
+  }
+  .sidebar-foot strong { display: none; }
   .topbar, .main { padding-left: 16px; padding-right: 16px; }
   .index-row, .exchange-grid, .split, .landing-grid, .stats { grid-template-columns: 1fr; }
   .quote-top, .breadth-top, .panel-head { align-items: flex-start; flex-direction: column; }

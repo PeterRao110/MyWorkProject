@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, watchEffect } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import AppSearch from "@/components/AppSearch.vue";
+import { logout } from "@/services/auth";
 import { getMarketStatus } from "@/services/market";
 
 const route = useRoute();
+const router = useRouter();
 const status = getMarketStatus();
 const researchActive = computed(() => route.name === "research" || route.name === "instrument");
 
@@ -14,6 +16,11 @@ watchEffect(() => {
   if (route.name === "schedule") document.title = "监控调度 · 投研";
   if (route.name === "settings") document.title = "系统设置 · 投研";
 });
+
+async function onLogout() {
+  await logout();
+  await router.replace({ name: "login" });
+}
 </script>
 
 <template>
@@ -22,8 +29,7 @@ watchEffect(() => {
       <div class="brand">
         <div class="mark">研</div>
         <div>
-          <strong>投研</strong>
-          <span>股票 · 期货</span>
+          <strong>数据分析平台</strong>
         </div>
       </div>
       <nav class="nav">
@@ -32,14 +38,14 @@ watchEffect(() => {
             <path d="M3 3v18h18" />
             <path d="M7 14l4-4 3 3 5-6" />
           </svg>
-          <span>市场</span>
+          <span>数据展示</span>
         </RouterLink>
         <RouterLink to="/research" class="nav-link" :class="{ active: researchActive }">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="11" cy="11" r="7" />
             <path d="M21 21l-4.3-4.3" />
           </svg>
-          <span>研究</span>
+          <span>数据研究</span>
         </RouterLink>
         <RouterLink to="/sync" class="nav-link" active-class="active">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -67,7 +73,7 @@ watchEffect(() => {
       </nav>
       <div class="sidebar-foot">
         <strong>{{ status.tradeDate }}</strong>
-        示例数据 · 日线已采集
+        <button class="logout-btn" type="button" @click="onLogout">退出登录</button>
       </div>
     </aside>
     <div class="workspace">

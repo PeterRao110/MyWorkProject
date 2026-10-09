@@ -1,11 +1,13 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config.env import port
 from app.routes import router
 from app.services import scheduler
+from app.services.auth_config import session_ok, COOKIE_NAME
 
 
 @asynccontextmanager
@@ -24,6 +26,17 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def require_login(request: Request, call_next):
+        path = request.url.path
+        public = path == "/api/health" or path.startswith("/api/auth/")
+        if request.method == "OPTIONS" or not path.startswith("/api/") or public:
+            return await call_next(request)
+        if session_ok(request.cookies.get(COOKIE_NAME)):
+            return await call_next(request)
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+
     app.include_router(router, prefix="/api")
     return app
 
