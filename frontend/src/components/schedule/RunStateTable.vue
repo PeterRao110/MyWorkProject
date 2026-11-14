@@ -30,7 +30,7 @@ const saving = ref(false);
 const error = ref("");
 
 function statusText(status: string) {
-  return { success: "成功", failed: "失败", running: "运行中" }[status] || "未运行";
+  return { success: "成功", failed: "失败", running: "运行中", stopped: "已停止" }[status] || "未运行";
 }
 
 function isRunning(jobId: number) {
@@ -125,7 +125,19 @@ function onInterval(event: Event) {
 }
 
 function tradeWindowJob(name: string) {
-  return name === "期货日线行情" || name === "期货复权行情" || name === "每日结算参数";
+  return (
+    name === "期货日线行情" ||
+    name === "期货复权行情" ||
+    name === "每日结算参数" ||
+    name === "仓单日报" ||
+    name === "每日成交持仓排名" ||
+    name === "期货交易所库存周报" ||
+    name === "标准仓单到期数量" ||
+    name === "期货交易参数" ||
+    name === "期货主力与连续合约" ||
+    name === "期货主要品种交易周报" ||
+    name === "期货合约涨跌停价格"
+  );
 }
 
 function todayInput() {
@@ -324,6 +336,9 @@ async function save() {
       </div>
       <p v-if="editing.jobName === '期货交易日历' || editing.jobName === '期货合约信息'" class="hint">
         修改下次开始日期或日期间隔时，会按日期间隔自动算出下次结束日期。该任务运行时使用调度配置里保存的入参。
+      </p>
+      <p v-else-if="editing.jobName === '期货主要品种交易周报'" class="hint">
+        修改下次开始日期或日期间隔时，会按日期间隔自动算出下次结束日期。下次开始日期不能超过当天。运行时把日期窗口换成 week 参数，按覆盖到的自然周逐周执行，每周间隔 3 秒，全部完成后状态变为成功。
       </p>
       <p v-else-if="tradeWindowJob(editing.jobName)" class="hint">
         修改下次开始日期或日期间隔时，会按日期间隔自动算出下次结束日期。下次开始日期不能超过当天。运行时 trade_date 从下次开始日期逐日执行到下次结束日期，每天间隔 3 秒，全部完成后状态变为成功。

@@ -32,7 +32,12 @@ _leader = False
 _manual_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="schedule-manual")
 _guards: dict[int, threading.Lock] = {}
 _group_guards: dict[int, threading.Lock] = {}
+_cancels: dict[int, threading.Event] = {}
 _guards_lock = threading.Lock()
+
+
+class JobStopped(Exception):
+    pass
 
 
 def connect_app() -> pymysql.Connection:
@@ -176,11 +181,23 @@ def _scheduled_time(scheduler_id: str) -> str:
 
 
 def run_now(job_id: int, trigger_type: str = "manual", override_params: dict | None = None) -> None:
+    _register_run(job_id)
     _manual_pool.submit(execute_job, job_id, trigger_type, override_params)
 
 
 def run_group(group_id: int, trigger_type: str = "manual", continue_chain: bool = False) -> None:
     _manual_pool.submit(execute_group, group_id, trigger_type, continue_chain)
+
+
+def stop_job(job_id: int) -> str:
+    with _guards_lock:
+        event = _cancels.get(job_id)
+        if event is not None:
+            event.set()
+            return "已请求停止"
+    if _mark_running_stopped(job_id):
+        return "已停止"
+    raise ValueError("当前没有正在运行的任务")
 
 
 def execute_job(
@@ -196,47 +213,66 @@ def execute_job(
         return False
     conn: pymysql.Connection | None = None
     try:
+        _register_run(job_id)
         conn = connect_app()
         job = _load_job(conn, job_id)
         if job is None:
             return False
+        if _cancelled(job_id):
+            _record_stopped(conn, job_id, trigger_type, group_run_id)
+            return False
+        if _week_window_job(job) and override_params is None:
+            return _execute_weekly_weeks(conn, job, trigger_type, group_run_id)
         if _trade_window_job(job) and override_params is None:
             return _execute_daily_dates(conn, job, trigger_type, group_run_id)
         params = _resolve_params(job, override_params)
         snapshot = json.dumps(params, ensure_ascii=False)
         run_id = _insert_run(conn, job_id, trigger_type, snapshot, group_run_id)
+        _finish_job(conn, job_id, "running", None)
         attempts = 1 + int(job.get("retry") or 0)
         error = ""
         for attempt in range(attempts):
             try:
+                if _cancelled(job_id):
+                    raise JobStopped()
                 items = _fetch_all(job, params, _fields(job))
-                count = tushare_writer.write_result(
-                    conn,
-                    job["target_table"],
-                    _pks(job),
-                    _fields(job),
-                    items,
-                    job["source"],
-                    _field_types(job),
-                )
+                if _cancelled(job_id):
+                    raise JobStopped()
+                count = _write_items(conn, job, items, params)
                 _finish_run(conn, run_id, "success", count, f"写入 {count} 行")
                 _finish_job(conn, job_id, "success", _watermark(job, items))
                 _cleanup_runs(conn, job_id)
                 if not _trade_window_job(job):
                     _advance_window(conn, job_id, params, run_id, count)
                 return True
+            except JobStopped:
+                _finish_run(conn, run_id, "stopped", 0, "已停止")
+                _finish_job(conn, job_id, "stopped", None)
+                _cleanup_runs(conn, job_id)
+                return False
             except Exception as exc:
                 error = str(exc)[:500]
                 if attempt + 1 < attempts:
-                    time.sleep(RETRY_INTERVAL_SECONDS)
+                    try:
+                        _sleep_interruptible(job_id, RETRY_INTERVAL_SECONDS)
+                    except JobStopped:
+                        _finish_run(conn, run_id, "stopped", 0, "已停止")
+                        _finish_job(conn, job_id, "stopped", None)
+                        _cleanup_runs(conn, job_id)
+                        return False
         _finish_run(conn, run_id, "failed", 0, error or "执行失败")
         _finish_job(conn, job_id, "failed", None)
         _cleanup_runs(conn, job_id)
+        return False
+    except JobStopped:
+        if conn is not None:
+            _record_stopped(conn, job_id, trigger_type, group_run_id)
         return False
     except Exception as exc:
         print(f"任务 {job_id} 执行异常：{exc}")
         return False
     finally:
+        _unregister_run(job_id)
         if conn is not None:
             conn.close()
         guard.release()
@@ -276,6 +312,13 @@ def _execute_daily_dates(
     last_id = 0
     attempts = 1 + int(job.get("retry") or 0)
     for index, day in enumerate(days):
+        if _cancelled(job_id):
+            if first_id:
+                _finish_job(conn, job_id, "stopped", None)
+                _cleanup_runs(conn, job_id)
+            else:
+                _record_stopped(conn, job_id, trigger_type, group_run_id)
+            return False
         params = {**resolved, "trade_date": day}
         snapshot = json.dumps(params, ensure_ascii=False)
         run_id = _insert_run(conn, job_id, trigger_type, snapshot, group_run_id)
@@ -286,38 +329,157 @@ def _execute_daily_dates(
         done = False
         for attempt in range(attempts):
             try:
+                if _cancelled(job_id):
+                    raise JobStopped()
                 items = _fetch_all(job, params, _fields(job))
-                count = tushare_writer.write_result(
-                    conn,
-                    job["target_table"],
-                    _pks(job),
-                    _fields(job),
-                    items,
-                    job["source"],
-                    _field_types(job),
-                )
+                if _cancelled(job_id):
+                    raise JobStopped()
+                count = _write_items(conn, job, items, params)
                 _finish_run(conn, run_id, "success", count, f"写入 {count} 行")
                 total += count
                 watermark = _watermark(job, items) or watermark
                 done = True
                 break
+            except JobStopped:
+                _finish_run(conn, run_id, "stopped", 0, "已停止")
+                _finish_job(conn, job_id, "stopped", None)
+                _cleanup_runs(conn, job_id)
+                return False
             except Exception as exc:
                 error = str(exc)[:500]
                 if attempt + 1 < attempts:
-                    time.sleep(RETRY_INTERVAL_SECONDS)
+                    try:
+                        _sleep_interruptible(job_id, RETRY_INTERVAL_SECONDS)
+                    except JobStopped:
+                        _finish_run(conn, run_id, "stopped", 0, "已停止")
+                        _finish_job(conn, job_id, "stopped", None)
+                        _cleanup_runs(conn, job_id)
+                        return False
         if not done:
             _finish_run(conn, run_id, "failed", 0, error or "执行失败")
             _finish_job(conn, job_id, "failed", None)
             _cleanup_runs(conn, job_id)
             return False
         if index + 1 < len(days):
-            time.sleep(DAY_GAP_SECONDS)
+            try:
+                _sleep_interruptible(job_id, DAY_GAP_SECONDS)
+            except JobStopped:
+                _finish_job(conn, job_id, "stopped", None)
+                _cleanup_runs(conn, job_id)
+                return False
     _finish_job(conn, job_id, "success", watermark)
     _cleanup_runs(conn, job_id)
     _advance_window(
         conn,
         job_id,
         {"trade_date": end},
+        last_id,
+        total,
+        traded_window=(start, end),
+        duration_ms=_window_duration(conn, first_id, last_id),
+    )
+    return True
+
+
+def _execute_weekly_weeks(
+    conn: pymysql.Connection,
+    job: dict,
+    trigger_type: str,
+    group_run_id: int | None,
+) -> bool:
+    job_id = int(job["id"])
+    window = _next_trade_window(conn, job_id)
+    if window is None:
+        run_id = _insert_run(conn, job_id, trigger_type, "{}", group_run_id)
+        _finish_run(conn, run_id, "failed", 0, "请先在调度运行监控中填写下次开始日期和下次结束日期")
+        _finish_job(conn, job_id, "failed", None)
+        _cleanup_runs(conn, job_id)
+        return False
+    start, end = window
+    if start > _today_text():
+        run_id = _insert_run(conn, job_id, trigger_type, "{}", group_run_id)
+        _finish_run(conn, run_id, "failed", 0, "下次开始日期不能超过当天")
+        _finish_job(conn, job_id, "failed", None)
+        _cleanup_runs(conn, job_id)
+        return False
+    weeks = _inclusive_weeks(start, end)
+    _finish_job(conn, job_id, "running", None)
+    base = json.loads(job.get("params_json") or "{}")
+    base.pop("start_date", None)
+    base.pop("end_date", None)
+    base.pop("trade_date", None)
+    base.pop("start_week", None)
+    base.pop("end_week", None)
+    base.pop("week_date", None)
+    base.pop("week", None)
+    resolved = _resolve_params(job, base)
+    total = 0
+    watermark = None
+    first_id = 0
+    last_id = 0
+    attempts = 1 + int(job.get("retry") or 0)
+    for index, week in enumerate(weeks):
+        if _cancelled(job_id):
+            if first_id:
+                _finish_job(conn, job_id, "stopped", None)
+                _cleanup_runs(conn, job_id)
+            else:
+                _record_stopped(conn, job_id, trigger_type, group_run_id)
+            return False
+        params = {**resolved, "week": week}
+        snapshot = json.dumps(params, ensure_ascii=False)
+        run_id = _insert_run(conn, job_id, trigger_type, snapshot, group_run_id)
+        if not first_id:
+            first_id = run_id
+        last_id = run_id
+        error = ""
+        done = False
+        for attempt in range(attempts):
+            try:
+                if _cancelled(job_id):
+                    raise JobStopped()
+                items = _fetch_all(job, params, _fields(job))
+                if _cancelled(job_id):
+                    raise JobStopped()
+                count = _write_items(conn, job, items, params)
+                _finish_run(conn, run_id, "success", count, f"写入 {count} 行")
+                total += count
+                watermark = _watermark(job, items) or watermark
+                done = True
+                break
+            except JobStopped:
+                _finish_run(conn, run_id, "stopped", 0, "已停止")
+                _finish_job(conn, job_id, "stopped", None)
+                _cleanup_runs(conn, job_id)
+                return False
+            except Exception as exc:
+                error = str(exc)[:500]
+                if attempt + 1 < attempts:
+                    try:
+                        _sleep_interruptible(job_id, RETRY_INTERVAL_SECONDS)
+                    except JobStopped:
+                        _finish_run(conn, run_id, "stopped", 0, "已停止")
+                        _finish_job(conn, job_id, "stopped", None)
+                        _cleanup_runs(conn, job_id)
+                        return False
+        if not done:
+            _finish_run(conn, run_id, "failed", 0, error or "执行失败")
+            _finish_job(conn, job_id, "failed", None)
+            _cleanup_runs(conn, job_id)
+            return False
+        if index + 1 < len(weeks):
+            try:
+                _sleep_interruptible(job_id, DAY_GAP_SECONDS)
+            except JobStopped:
+                _finish_job(conn, job_id, "stopped", None)
+                _cleanup_runs(conn, job_id)
+                return False
+    _finish_job(conn, job_id, "success", watermark)
+    _cleanup_runs(conn, job_id)
+    _advance_window(
+        conn,
+        job_id,
+        {"week": _iso_week_text(end)},
         last_id,
         total,
         traded_window=(start, end),
@@ -344,6 +506,23 @@ def _inclusive_days(start: str, end: str) -> list[str]:
         days.append(day)
         day = _add_days(day, 1)
     return days
+
+
+def _iso_week_text(day: str) -> str:
+    iso = datetime.strptime(day, "%Y%m%d").isocalendar()
+    return f"{iso.year}{int(iso.week):02d}"
+
+
+def _inclusive_weeks(start: str, end: str) -> list[str]:
+    weeks = []
+    seen: set[str] = set()
+    for day in _inclusive_days(start, end):
+        week = _iso_week_text(day)
+        if week in seen:
+            continue
+        seen.add(week)
+        weeks.append(week)
+    return weeks
 
 
 def _window_duration(conn: pymysql.Connection, first_id: int, last_id: int) -> int | None:
@@ -518,6 +697,73 @@ def _day_number(value: str) -> str:
     return str((number + 6) % 7)
 
 
+def _register_run(job_id: int) -> threading.Event:
+    with _guards_lock:
+        event = _cancels.get(job_id)
+        if event is None:
+            event = threading.Event()
+            _cancels[job_id] = event
+        return event
+
+
+def _unregister_run(job_id: int) -> None:
+    with _guards_lock:
+        _cancels.pop(job_id, None)
+
+
+def _cancelled(job_id: int) -> bool:
+    event = _cancels.get(job_id)
+    return bool(event and event.is_set())
+
+
+def _sleep_interruptible(job_id: int, seconds: int) -> None:
+    deadline = time.time() + max(seconds, 0)
+    while True:
+        if _cancelled(job_id):
+            raise JobStopped()
+        remain = deadline - time.time()
+        if remain <= 0:
+            return
+        time.sleep(min(1, remain))
+
+
+def _record_stopped(
+    conn: pymysql.Connection,
+    job_id: int,
+    trigger_type: str,
+    group_run_id: int | None,
+) -> None:
+    run_id = _insert_run(conn, job_id, trigger_type, "{}", group_run_id)
+    _finish_run(conn, run_id, "stopped", 0, "已停止")
+    _finish_job(conn, job_id, "stopped", None)
+    _cleanup_runs(conn, job_id)
+
+
+def _mark_running_stopped(job_id: int) -> bool:
+    try:
+        conn = connect_app()
+    except (MySQLError, OSError):
+        return False
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE schedule_run SET status='stopped', finished_at=NOW(), message='已停止' "
+                "WHERE job_id=%s AND status='running'",
+                (job_id,),
+            )
+            runs = cursor.rowcount
+            cursor.execute(
+                "UPDATE schedule_job SET last_status='stopped' WHERE id=%s AND last_status='running'",
+                (job_id,),
+            )
+            job = cursor.rowcount
+        return runs > 0 or job > 0
+    except MySQLError:
+        return False
+    finally:
+        conn.close()
+
+
 def _guard_for(job_id: int) -> threading.Lock:
     with _guards_lock:
         guard = _guards.get(job_id)
@@ -634,26 +880,78 @@ def _expand(params: dict[str, str]) -> list[dict[str, str]]:
     return combos
 
 
+def _page_size(job: dict) -> int:
+    if job.get("api_name") == "fut_wsr" or job.get("name") == "仓单日报":
+        return 1500
+    if job.get("api_name") == "fut_holding" or job.get("name") == "每日成交持仓排名":
+        return 2000
+    if job.get("api_name") == "fut_inv_weekly" or job.get("name") == "期货交易所库存周报":
+        return 3000
+    if job.get("api_name") == "fut_rcpt_mat" or job.get("name") == "标准仓单到期数量":
+        return 3000
+    if job.get("api_name") == "fut_trade_param" or job.get("name") == "期货交易参数":
+        return 3000
+    if job.get("api_name") == "fut_mapping" or job.get("name") == "期货主力与连续合约":
+        return 2000
+    if job.get("api_name") == "fut_weekly_detail" or job.get("name") == "期货主要品种交易周报":
+        return 4000
+    if job.get("api_name") == "ft_limit" or job.get("name") == "期货合约涨跌停价格":
+        return 2000
+    return PAGE_SIZE
+
+
+def _write_items(conn: pymysql.Connection, job: dict, items: list[list], params: dict[str, str]) -> int:
+    pks = _pks(job)
+    partition = None
+    if _partition_trade_date_job(job):
+        day = str(params.get("trade_date") or "").strip()
+        if day:
+            partition = {"trade_date": day}
+            pks = []
+    elif _partition_week_job(job):
+        week = str(params.get("week") or "").strip()
+        if week:
+            partition = {"week": week}
+            pks = []
+    return tushare_writer.write_result(
+        conn,
+        job["target_table"],
+        pks,
+        _fields(job),
+        items,
+        job["source"],
+        _field_types(job),
+        partition,
+    )
+
+
 def _fetch_all(job: dict, params: dict[str, str], fields: list[str]) -> list[list]:
     items: list[list] = []
+    job_id = int(job["id"])
+    page_size = _page_size(job)
     for combo in _expand(params):
         offset = 0
         for _ in range(MAX_PAGES):
-            page = {**combo, "limit": str(PAGE_SIZE), "offset": str(offset)}
+            if _cancelled(job_id):
+                raise JobStopped()
+            page = {**combo, "limit": str(page_size), "offset": str(offset)}
             result = query_api(job["source"], job["api_name"], page, fields)
             batch = result["items"]
             items.extend(batch)
-            if len(batch) < PAGE_SIZE:
+            if len(batch) < page_size:
                 break
-            offset += PAGE_SIZE
+            offset += page_size
     return items
 
 
 def _watermark(job: dict, items: list[list]) -> str | None:
     fields = _fields(job)
-    if "trade_date" not in fields or not items:
+    if not items:
         return None
-    index = fields.index("trade_date")
+    key = "trade_date" if "trade_date" in fields else "week_date" if "week_date" in fields else None
+    if key is None:
+        return None
+    index = fields.index(key)
     values = [str(row[index]) for row in items if index < len(row) and row[index] not in (None, "")]
     if not values:
         return None
@@ -830,7 +1128,7 @@ def save_run_state(job_id: int, payload: dict) -> dict | None:
         if not next_start and not next_end and last_end:
             next_start = _add_days(last_end, 1)
             next_end = _add_days(next_start, interval - 1)
-        if _trade_window_job(job) and next_start and next_start > _today_text():
+        if _date_window_job(job) and next_start and next_start > _today_text():
             raise ValueError("下次开始日期不能超过当天")
         if next_start and next_end and next_end < next_start:
             raise ValueError("下次结束日期不能早于开始日期")
@@ -925,7 +1223,7 @@ def _advance_window(
         if start and end and (not last_end or end >= last_end):
             last_start = start
             stored_end = end
-        if traded_window and _trade_window_job(job):
+        if traded_window and _date_window_job(job):
             start, end = traded_window
             last_start = start
             stored_end = end
@@ -939,7 +1237,7 @@ def _advance_window(
         elif moved:
             next_start = _add_days(end, 1)
             next_end = _add_days(next_start, max(interval, 1) - 1)
-            if _trade_window_job(job) and next_start > _today_text():
+            if _date_window_job(job) and next_start > _today_text():
                 next_start = _today_text()
                 next_end = _add_days(next_start, max(interval, 1) - 1)
         with conn.cursor() as cursor:
@@ -1060,7 +1358,7 @@ def _sync_param_dates(conn: pymysql.Connection) -> None:
 
 
 def _apply_param_dates(conn: pymysql.Connection, job: dict) -> None:
-    if _clock_window_job(job) or _trade_window_job(job):
+    if _clock_window_job(job) or _date_window_job(job):
         return
     state = _load_state(conn, int(job["id"]))
     if state is None:
@@ -1125,8 +1423,43 @@ def _run_day(value) -> str:
     return parsed or datetime.now(TZ).strftime("%Y%m%d")
 
 
+def _partition_trade_date_job(job: dict | None) -> bool:
+    if not job:
+        return False
+    if job.get("api_name") in ("fut_wsr", "fut_holding", "fut_inv_weekly", "fut_rcpt_mat", "fut_trade_param", "fut_mapping", "ft_limit"):
+        return True
+    return job.get("name") in ("仓单日报", "每日成交持仓排名", "期货交易所库存周报", "标准仓单到期数量", "期货交易参数", "期货主力与连续合约", "期货合约涨跌停价格")
+
+
+def _partition_week_job(job: dict | None) -> bool:
+    if not job:
+        return False
+    if job.get("api_name") == "fut_weekly_detail":
+        return True
+    return job.get("name") == "期货主要品种交易周报"
+
+
+def _week_window_job(job: dict | None) -> bool:
+    return _partition_week_job(job)
+
+
+def _date_window_job(job: dict | None) -> bool:
+    return _trade_window_job(job) or _week_window_job(job)
+
+
 def _trade_window_job(job: dict | None) -> bool:
-    return bool(job) and job.get("name") in ("期货日线行情", "期货复权行情", "每日结算参数")
+    return bool(job) and job.get("name") in (
+        "期货日线行情",
+        "期货复权行情",
+        "每日结算参数",
+        "仓单日报",
+        "每日成交持仓排名",
+        "期货交易所库存周报",
+        "标准仓单到期数量",
+        "期货交易参数",
+        "期货主力与连续合约",
+        "期货合约涨跌停价格",
+    )
 
 
 def _date_binding(params: dict, job: dict | None = None) -> tuple[str, str, str]:
@@ -1152,6 +1485,24 @@ def _write_window_params(conn: pymysql.Connection, job_id: int, start: str, end:
     if job is None or _clock_window_job(job):
         return
     params = json.loads(job.get("params_json") or "{}")
+    if _week_window_job(job):
+        params.pop("start_date", None)
+        params.pop("end_date", None)
+        params.pop("trade_date", None)
+        params.pop("start_week", None)
+        params.pop("end_week", None)
+        params.pop("week_date", None)
+        week = _iso_week_text(start) if start else ""
+        if week:
+            params["week"] = week
+        else:
+            params.pop("week", None)
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE schedule_job SET params_json=%s WHERE id=%s",
+                (json.dumps(params, ensure_ascii=False), job_id),
+            )
+        return
     if _trade_window_job(job):
         params.pop("start_date", None)
         params.pop("end_date", None)

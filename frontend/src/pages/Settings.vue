@@ -179,8 +179,8 @@ function validDatabase() {
 
 <template>
   <section class="settings-layout">
-    <aside class="submenu" aria-label="系统设置子菜单">
-      <p class="submenu-title">系统设置</p>
+    <aside class="submenu" aria-label="系统基础设置子菜单">
+      <p class="submenu-title">系统基础设置</p>
       <button
         v-for="item in sections"
         :key="item.id"

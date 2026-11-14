@@ -311,7 +311,7 @@ function show(text: string, ok: boolean) {
         <button type="button" class="ghost-btn" :disabled="!schema?.apiName" @click="saveAsJob">存为定时任务</button>
         <a class="ghost-btn" :href="docHref" target="_blank" rel="noopener noreferrer">详细文档</a>
       </div>
-      <p v-if="sources && schema && !tokenReady" class="tool-msg">当前接口还没有保存 Token，运行测试前请到系统设置填写。</p>
+      <p v-if="sources && schema && !tokenReady" class="tool-msg">当前接口还没有保存 Token，运行测试前请到系统基础设置填写。</p>
       <p v-if="message" class="tool-msg" :class="{ ok: messageOk, error: !messageOk }">{{ message }}</p>
 
       <div class="result-head">

@@ -421,6 +421,16 @@ def run_job(job_id: int) -> dict:
     return {"ok": True, "message": "已触发运行"}
 
 
+@router.post("/schedule/jobs/{job_id}/stop")
+def stop_job(job_id: int) -> dict:
+    _fetch_job(job_id)
+    try:
+        message = scheduler.stop_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "message": message}
+
+
 @router.get("/schedule/jobs/{job_id}/runs")
 def list_runs(job_id: int) -> list[dict]:
     try:

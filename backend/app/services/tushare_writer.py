@@ -57,6 +57,7 @@ def write_result(
     items: list[list],
     source: str,
     field_types: dict[str, str] | None = None,
+    partition: dict[str, str] | None = None,
 ) -> int:
     if not valid_ident(table):
         raise WriterError("目标表名不正确")
@@ -64,15 +65,24 @@ def write_result(
         raise WriterError("写入字段不正确")
     if any(not valid_ident(name) for name in pks):
         raise WriterError("主键不正确")
+    if partition and any(not valid_ident(name) for name in partition):
+        raise WriterError("分片键不正确")
     missing = [key for key in pks if key not in fields]
     if missing:
         raise WriterError(f"主键必须包含在勾选字段中：{', '.join(missing)}")
+    if partition:
+        missing_part = [key for key in partition if key not in fields]
+        if missing_part:
+            raise WriterError(f"分片键必须包含在勾选字段中：{', '.join(missing_part)}")
+        pks = []
     columns = [(name, _type_for(name, index, field_types, items)) for index, name in enumerate(fields)]
     data_conn = connect_data()
     try:
         with data_conn.cursor() as cursor:
             _ensure_table(cursor, app_conn, table, columns, pks)
-            if pks:
+            if partition:
+                _replace_partition(cursor, table, fields, items, source, partition)
+            elif pks:
                 _upsert(cursor, table, fields, items, source)
             else:
                 _replace(cursor, table, fields, items, source)
@@ -177,6 +187,24 @@ def _replace(cursor, table: str, fields: list[str], items: list[list], source: s
         return
     # 业务唯一索引不含 source。另一调用源已占用同一主键时，更新该行并改写 source。
     _upsert(cursor, table, fields, items, source)
+
+
+def _replace_partition(
+    cursor,
+    table: str,
+    fields: list[str],
+    items: list[list],
+    source: str,
+    partition: dict[str, str],
+) -> None:
+    clauses = ["`source`=%s"]
+    values: list = [source]
+    for name, value in partition.items():
+        clauses.append(f"`{name}`=%s")
+        values.append(value)
+    cursor.execute(f"DELETE FROM `{table}` WHERE " + " AND ".join(clauses), values)
+    if items:
+        _upsert(cursor, table, fields, items, source)
 
 
 def _rows(fields: list[str], items: list[list], source: str) -> list[list]:

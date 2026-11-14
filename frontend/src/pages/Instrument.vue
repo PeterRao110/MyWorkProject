@@ -54,7 +54,7 @@ watch(
 watch(
   quote,
   (value) => {
-    document.title = value ? `${value.name} · 投研` : "研究 · 投研";
+    document.title = value ? `${value.name} · 数据` : "研究 · 数据";
   },
   { immediate: true },
 );

@@ -1,3 +1,4 @@
+import gzip
 import json
 import re
 from urllib import error, parse, request
@@ -56,7 +57,12 @@ def _query_classic(
         {"api_name": api_name, "token": token, "params": params, "fields": ",".join(fields)}
     ).encode("utf-8")
     payload = _read_json(
-        request.Request(base_url, data=body, headers={"Content-Type": "application/json"}, method="POST"),
+        request.Request(
+            base_url,
+            data=body,
+            headers={"Content-Type": "application/json", "Accept-Encoding": "gzip"},
+            method="POST",
+        ),
         timeout,
         retry,
     )
@@ -74,7 +80,7 @@ def _query_relay(
     fallback: bool,
 ) -> dict:
     endpoint = base_url.rstrip("/") + "/" + parse.quote(api_name)
-    headers = {"X-API-Key": token, "Accept": "application/json"}
+    headers = {"X-API-Key": token, "Accept": "application/json", "Accept-Encoding": "gzip"}
     method = "GET"
     last_error = "接口请求失败"
     for _ in range(retry + 1):
@@ -125,9 +131,9 @@ def _send(
         )
     try:
         with request.urlopen(req, timeout=timeout) as response:
-            return response.status, _decode(response.read().decode("utf-8"))
+            return response.status, _decode(_read_body(response).decode("utf-8"))
     except error.HTTPError as exc:
-        return exc.code, _decode(exc.read().decode("utf-8", errors="replace"))
+        return exc.code, _decode(_read_body(exc).decode("utf-8", errors="replace"))
 
 
 def _read_json(req: request.Request, timeout: int, retry: int) -> dict:
@@ -135,9 +141,9 @@ def _read_json(req: request.Request, timeout: int, retry: int) -> dict:
     for _ in range(retry + 1):
         try:
             with request.urlopen(req, timeout=timeout) as response:
-                return _decode(response.read().decode("utf-8"))
+                return _decode(_read_body(response).decode("utf-8"))
         except error.HTTPError as exc:
-            payload = _decode(exc.read().decode("utf-8", errors="replace"))
+            payload = _decode(_read_body(exc).decode("utf-8", errors="replace"))
             raise TushareError(_message(payload) or f"接口返回 HTTP {exc.code}") from exc
         except (error.URLError, TimeoutError):
             last_error = "连接 Tushare 接口失败"
@@ -155,6 +161,17 @@ def _rows(payload: dict, fields: list[str]) -> dict:
         items = items[:8000]
         message = "结果较多，仅显示前 8000 行"
     return {"fields": columns, "items": items, "message": message}
+
+
+def _read_body(response) -> bytes:
+    raw = response.read()
+    encoding = ""
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        encoding = (headers.get("Content-Encoding") or "").lower()
+    if "gzip" in encoding or (len(raw) >= 2 and raw[0] == 0x1F and raw[1] == 0x8B):
+        return gzip.decompress(raw)
+    return raw
 
 
 def _decode(raw: str) -> dict:

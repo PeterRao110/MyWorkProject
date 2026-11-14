@@ -19,6 +19,7 @@ import {
   retryScheduleRun,
   runScheduleGroup,
   runScheduleJob,
+  stopScheduleJob,
   toggleScheduleGroup,
   toggleScheduleJob,
   type ScheduleGroup,
@@ -54,6 +55,7 @@ const loadError = ref("");
 const refreshingRuns = ref(false);
 const pageTab = ref<"config" | "status">("status");
 const runningJobIds = ref<number[]>([]);
+const stoppingJobIds = ref<number[]>([]);
 let pageAlive = true;
 
 const sortedGroups = computed(() =>
@@ -238,12 +240,55 @@ async function toggleGroup(group: ScheduleGroup, event: Event) {
   }
 }
 
+function jobIsRunning(job: ScheduleJob) {
+  if (runningJobIds.value.includes(job.id) || job.lastStatus === "running") return true;
+  if (selectedJob.value?.id === job.id) return runs.value[0]?.status === "running";
+  return false;
+}
+
 async function runJob(job: ScheduleJob) {
+  if (jobIsRunning(job)) {
+    await stopJobRun(job);
+    return;
+  }
+  await startJobRun(job);
+}
+
+async function startJobRun(job: ScheduleJob) {
+  if (runningJobIds.value.includes(job.id)) return;
+  runningJobIds.value = [...runningJobIds.value, job.id];
   try {
+    let baselineId: number | null = null;
+    try {
+      const existing = await listScheduleRuns(job.id);
+      baselineId = existing[0]?.id ?? 0;
+    } catch {
+      baselineId = null;
+    }
     await runScheduleJob(job.id);
-    window.setTimeout(() => void refresh(true), 2000);
+    await waitForTriggeredRun(job.id, baselineId);
+    if (!pageAlive) return;
+    await refresh(true);
   } catch (error) {
     show(error instanceof Error ? error.message : "触发失败", false);
+  } finally {
+    runningJobIds.value = runningJobIds.value.filter((id) => id !== job.id);
+  }
+}
+
+async function stopJobRun(job: ScheduleJob) {
+  if (stoppingJobIds.value.includes(job.id)) return;
+  stoppingJobIds.value = [...stoppingJobIds.value, job.id];
+  try {
+    await stopScheduleJob(job.id);
+    await waitUntilIdle(job.id);
+    if (!pageAlive) return;
+    await refresh(true);
+  } catch (error) {
+    show(error instanceof Error ? error.message : "停止失败", false);
+  } finally {
+    stoppingJobIds.value = stoppingJobIds.value.filter((id) => id !== job.id);
+    runningJobIds.value = runningJobIds.value.filter((id) => id !== job.id);
   }
 }
 
@@ -317,62 +362,71 @@ function runSelectedJob() {
   void runJob(selectedJob.value);
 }
 
+function selectedJobRunning() {
+  return selectedJob.value ? jobIsRunning(selectedJob.value) : false;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 async function waitForTriggeredRun(jobId: number, baselineId: number | null) {
   const deadline = Date.now() + 30 * 60 * 1000;
-  let sawRunning = false;
   while (pageAlive && Date.now() < deadline) {
     await sleep(1000);
     if (!pageAlive) return;
     try {
-      const [runs, states] = await Promise.all([listScheduleRuns(jobId), listScheduleRunStates()]);
-      const latest = runs[0];
-      const jobRunning = states.find((item) => item.jobId === jobId)?.lastStatus === "running";
-      if (jobRunning) {
-        sawRunning = true;
-        continue;
+      const [jobRuns, jobList] = await Promise.all([listScheduleRuns(jobId), listScheduleJobs()]);
+      if (selectedKind.value === "job" && selectedId.value === jobId) {
+        runs.value = jobRuns;
+        const current = jobList.find((item) => item.id === jobId);
+        if (current) {
+          jobs.value = jobs.value.map((item) => (item.id === jobId ? { ...item, lastStatus: current.lastStatus } : item));
+        }
       }
+      const job = jobList.find((item) => item.id === jobId);
+      if (job?.lastStatus === "running") continue;
+      const latest = jobRuns[0];
       if (!latest) continue;
-      if (baselineId !== null) {
-        if (latest.id > baselineId && latest.status !== "running") return;
-        continue;
-      }
-      if (latest.status === "running") sawRunning = true;
-      if (sawRunning && latest.status !== "running") return;
+      if (baselineId !== null && latest.id <= baselineId) continue;
+      if (latest.status !== "running") return;
     } catch {
       // 下一轮再查这次运行是否已经结束
     }
   }
 }
 
+async function waitUntilIdle(jobId: number) {
+  const deadline = Date.now() + 30 * 60 * 1000;
+  let idleTicks = 0;
+  while (pageAlive && Date.now() < deadline) {
+    await sleep(500);
+    if (!pageAlive) return;
+    try {
+      const [jobRuns, jobList] = await Promise.all([listScheduleRuns(jobId), listScheduleJobs()]);
+      if (selectedKind.value === "job" && selectedId.value === jobId) runs.value = jobRuns;
+      const latest = jobRuns[0];
+      const job = jobList.find((item) => item.id === jobId);
+      if (job?.lastStatus === "running" || latest?.status === "running") {
+        idleTicks = 0;
+        continue;
+      }
+      if (latest?.status === "stopped" || job?.lastStatus === "stopped") return;
+      idleTicks += 1;
+      if (idleTicks >= 4) return;
+    } catch {
+      // 下一轮再查是否已经停下
+    }
+  }
+}
+
 async function runStateJob(jobId: number) {
-  if (runningJobIds.value.includes(jobId)) return;
   const job = jobs.value.find((item) => item.id === jobId);
   if (!job) {
     show("任务不存在", false);
     return;
   }
-  runningJobIds.value = [...runningJobIds.value, jobId];
-  try {
-    let baselineId: number | null = null;
-    try {
-      const existing = await listScheduleRuns(jobId);
-      baselineId = existing[0]?.id ?? 0;
-    } catch {
-      baselineId = null;
-    }
-    await runScheduleJob(jobId);
-    await waitForTriggeredRun(jobId, baselineId);
-    if (!pageAlive) return;
-    await refresh(true);
-  } catch (error) {
-    show(error instanceof Error ? error.message : "触发失败", false);
-  } finally {
-    runningJobIds.value = runningJobIds.value.filter((id) => id !== jobId);
-  }
+  await startJobRun(job);
 }
 
 async function refreshRuns() {
@@ -525,7 +579,7 @@ async function onSaved() {
 }
 
 function statusText(status: string) {
-  return { success: "成功", failed: "失败", running: "运行中" }[status] || "未运行";
+  return { success: "成功", failed: "失败", running: "运行中", stopped: "已停止" }[status] || "未运行";
 }
 
 function triggerText(trigger: string) {
@@ -544,7 +598,7 @@ function show(_text: string, _ok: boolean) {}
 
 <template>
   <section class="sched">
-    <div class="seg sched-tabs" role="tablist" aria-label="监控调度">
+    <div class="seg sched-tabs" role="tablist" aria-label="监控调度管理">
       <button
         type="button"
         role="tab"
@@ -588,6 +642,7 @@ function show(_text: string, _ok: boolean) {}
             <button type="button" class="run-btn" @click="openCreate">新建任务</button>
           </div>
         </div>
+        <div class="sched-list-body">
 
         <div class="list-section">
           <strong>任务组</strong>
@@ -666,10 +721,11 @@ function show(_text: string, _ok: boolean) {}
               :aria-label="`启用 ${job.name}`"
               @change="toggleJob(job, $event)"
             />
-            <button type="button" class="text-btn" @click="runJob(job)">运行</button>
+            <button type="button" class="text-btn" @click="runJob(job)">{{ jobIsRunning(job) ? "停止" : "运行" }}</button>
           </div>
         </div>
         <p v-if="!standaloneJobs.length && !loadError" class="pane-empty">没有单独调度的任务。</p>
+        </div>
       </aside>
 
       <div v-if="selectedGroup" class="panel sched-detail">
@@ -683,6 +739,7 @@ function show(_text: string, _ok: boolean) {}
             <button type="button" class="ghost-btn danger" @click="removeGroup(selectedGroup)">删除</button>
           </div>
         </div>
+        <div class="sched-detail-body">
         <dl class="job-meta">
           <div>
             <dt>组间顺序</dt>
@@ -775,6 +832,7 @@ function show(_text: string, _ok: boolean) {}
           </table>
           <p v-else class="pane-empty">还没有运行记录。</p>
         </div>
+        </div>
       </div>
 
       <div v-else-if="selectedJob" class="panel sched-detail">
@@ -784,12 +842,21 @@ function show(_text: string, _ok: boolean) {}
             <span v-if="selectedJob.groupId" class="detail-pair">
               <button type="button" class="ghost-btn" @click="backToGroup">返回任务组</button>
               <button type="button" class="ghost-btn" :disabled="refreshingRuns" @click="refreshRuns">刷新</button>
-              <button type="button" class="ghost-btn" @click="runSelectedJob">运行任务</button>
             </span>
+            <button
+              type="button"
+              class="ghost-btn"
+              :class="{ danger: selectedJobRunning() }"
+              :disabled="stoppingJobIds.includes(selectedJob.id)"
+              @click="runSelectedJob"
+            >
+              {{ selectedJobRunning() ? "停止任务" : "运行任务" }}
+            </button>
             <button type="button" class="ghost-btn" @click="openEditJob">编辑</button>
             <button type="button" class="ghost-btn danger" @click="removeJob(selectedJob)">删除</button>
           </div>
         </div>
+        <div class="sched-detail-body">
         <dl class="job-meta">
           <div>
             <dt>接口</dt>
@@ -860,6 +927,7 @@ function show(_text: string, _ok: boolean) {}
             </tbody>
           </table>
           <p v-else class="pane-empty">还没有运行记录。</p>
+        </div>
         </div>
       </div>
       <div v-else class="panel sched-detail">

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.routes.auth import router as auth_router
+from app.routes.daily_review import router as daily_review_router
 from app.routes.health import router as health_router
 from app.routes.schedule import router as schedule_router
 from app.routes.settings import router as settings_router
@@ -8,6 +9,7 @@ from app.routes.tushare import router as tushare_router
 
 router = APIRouter()
 router.include_router(auth_router)
+router.include_router(daily_review_router)
 router.include_router(health_router)
 router.include_router(schedule_router)
 router.include_router(settings_router)

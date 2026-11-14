@@ -40,6 +40,18 @@ a { color: inherit; }
 .flat { color: var(--muted); }
 
 .shell { display: flex; min-height: 100vh; }
+.shell-fill { height: 100vh; overflow: hidden; }
+html:has(.shell-fill),
+html:has(.shell-fill) body,
+html:has(.shell-fill) #app {
+  height: 100%;
+  overflow: hidden;
+}
+.shell-fill .workspace {
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
 
 .sidebar {
   width: 232px;
@@ -149,7 +161,12 @@ a { color: inherit; }
 
 .sidebar-foot strong { display: block; color: var(--ink); font-size: 13px; }
 
-.workspace { flex: 1; min-width: 0; }
+.workspace {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
 
 .topbar {
   position: sticky;
@@ -162,7 +179,15 @@ a { color: inherit; }
   backdrop-filter: blur(8px);
 }
 
-.main { padding: 8px 28px 48px; }
+.main { padding: 8px 28px 48px; flex: 1; }
+.main-fill {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
 
 .page-head { margin-bottom: 18px; }
 .page-head h1 { margin: 0; font-size: 28px; line-height: 1.2; }
@@ -654,17 +679,32 @@ select {
 
 .missing { padding: 24px; }
 
+.sched {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .sched-grid {
   display: grid;
   grid-template-columns: 420px minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
-  margin-top: 4px;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  margin-top: 0;
 }
 
-.sched-tabs { margin: 0 0 16px; }
-.sched-state { margin-top: 0; }
-.state-wrap { max-height: calc(100vh - 220px); }
+.sched-tabs { margin: 0 0 16px; flex: none; }
+.sched-monitor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sched-state { margin-top: 0; flex: 1; min-height: 0; overflow: auto; }
+.state-wrap { max-height: none; }
 .state-table th, .state-table td { text-align: left; }
 .state-table th.ops, .state-table td.ops { text-align: center; }
 .state-ops { display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -672,8 +712,24 @@ select {
 .state-edit .form-grid { margin-top: 14px; }
 .state-edit input[readonly] { background: #f8fafc; }
 
-.sched-list, .sched-detail { min-width: 0; }
+.sched-list, .sched-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 .sched-list { padding: 12px; }
+.sched-list-body, .sched-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.sched-detail-body .table-wrap,
+.sched-detail-body .runs-wrap {
+  max-height: none;
+  overflow: visible;
+}
 .sched-detail .panel-head { align-items: flex-start; }
 .sched-detail .detail-ops { flex-wrap: wrap; justify-content: flex-end; }
 .sched .panel h2 { white-space: normal; }
@@ -750,7 +806,7 @@ select {
   font-weight: 600;
 }
 
-.sched-detail { padding: 16px 18px; min-height: 320px; }
+.sched-detail { padding: 16px 18px; }
 .detail-ops { display: flex; gap: 8px; }
 .detail-pair { display: inline-flex; gap: 8px; flex: none; }
 .ghost-btn.danger { background: var(--up-soft); color: var(--up); }
@@ -782,6 +838,7 @@ select {
 .run-status.success { color: var(--down); }
 .run-status.failed { color: var(--up); }
 .run-status.running { color: var(--accent); }
+.run-status.stopped { color: var(--muted); }
 .run-spin {
   display: inline-flex;
   width: 16px;
@@ -885,6 +942,192 @@ select {
 .job-modal-form .modal-actions,
 .job-modal-form > .hint { flex: none; }
 
+.review-page { display: grid; }
+
+.review-list { padding: 8px 8px 0; }
+
+.review-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 4px;
+}
+
+.review-filter span { color: var(--muted); font-size: 12px; }
+
+.review-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.review-table th,
+.review-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.review-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.review-table td.wrap {
+  white-space: normal;
+  min-width: 140px;
+}
+
+.review-table tbody tr { cursor: pointer; }
+.review-table tbody tr:hover,
+.review-table tbody tr.selected { background: var(--accent-soft); }
+.review-empty-cell { color: var(--muted); cursor: default; }
+
+.review-main { display: grid; gap: 16px; }
+.review-gap { margin-top: 16px; }
+
+.review-detail {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.review-date {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  align-content: stretch;
+  min-height: 100%;
+  padding: 16px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.date-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.date-card-icon {
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+
+.date-card span { display: block; font-size: 12px; }
+.date-card strong { display: block; font-size: 18px; line-height: 1.2; }
+
+.date-tree { min-height: 0; overflow: auto; font-size: 14px; }
+
+.date-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 6px 2px;
+  text-align: left;
+}
+
+.date-children { padding-left: 14px; }
+
+.caret {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.caret.open { transform: rotate(90deg); }
+
+.date-days { display: grid; gap: 2px; padding: 2px 0 6px; }
+
+.date-day {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--ink);
+}
+
+.date-day:hover { background: #f8fafc; }
+.date-day.active {
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 0 0 6px var(--accent-soft);
+}
+.date-day.active:hover { background: var(--accent); }
+
+.review-date .chip { justify-self: start; }
+
+.review-detail-main {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+
+.review-date label,
+.review-form label,
+.review-item label {
+  display: grid;
+  gap: 6px;
+}
+
+.review-date span,
+.review-form label span,
+.review-item label span { color: var(--muted); font-size: 12px; }
+
+.date-card,
+.date-card span { color: var(--accent); }
+
+.review-date input,
+.review-form input,
+.review-form textarea,
+.review-item textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 9px 12px;
+}
+
+.review-form { display: grid; gap: 12px; padding: 16px; }
+.review-form h2 { margin: 0; font-size: 16px; }
+.review-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(160px, 0.7fr);
+  gap: 12px;
+  align-items: end;
+}
+.review-form input[readonly] { background: var(--bg); }
+.review-symbol { position: relative; }
+.review-empty { padding: 16px; color: var(--muted); }
+
+.review-item { display: grid; gap: 10px; padding: 16px; }
+.review-item-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.review-item-head strong { display: block; }
+.review-item-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.review-item-ops { display: flex; gap: 8px; flex: none; }
+.review-actions { display: flex; align-items: center; gap: 12px; }
+
+.chip.planning { background: #f1f5f9; }
+.chip.ready { background: #fef3c7; color: #92400e; }
+.chip.reviewed { background: var(--down-soft); color: var(--down); }
+
 @media (max-width: 1200px) {
   .index-row, .exchange-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .split, .landing-grid { grid-template-columns: 1fr 1fr; }
@@ -916,9 +1159,22 @@ select {
   }
   .sidebar-foot strong { display: none; }
   .topbar, .main { padding-left: 16px; padding-right: 16px; }
+  html:has(.shell-fill),
+  html:has(.shell-fill) body,
+  html:has(.shell-fill) #app {
+    height: auto;
+    overflow: auto;
+  }
+  .shell-fill { height: auto; overflow: visible; }
+  .shell-fill .workspace { height: auto; overflow: visible; }
+  .main-fill { height: auto; overflow: visible; }
+  .sched { flex: none; }
+  .sched-grid, .sched-monitor, .sched-state { flex: none; }
+  .sched-list, .sched-detail { overflow: visible; }
+  .sched-list-body, .sched-detail-body { overflow: visible; }
   .index-row, .exchange-grid, .split, .landing-grid, .stats { grid-template-columns: 1fr; }
   .quote-top, .breadth-top, .panel-head { align-items: flex-start; flex-direction: column; }
-  .settings-layout, .ts-tool, .ts-panes, .sched-grid, .job-modal-body { grid-template-columns: 1fr; }
+  .settings-layout, .ts-tool, .ts-panes, .sched-grid, .job-modal-body, .review-detail, .review-pair { grid-template-columns: 1fr; }
   .job-modal { height: auto; }
   .job-modal-tree { height: auto; max-height: 28vh; }
   .job-modal-form { height: auto; }

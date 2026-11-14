@@ -11,7 +11,7 @@ defineProps<{
 const emit = defineEmits<{ close: [] }>();
 
 function statusText(status: string) {
-  return { success: "成功", failed: "失败", running: "运行中" }[status] || "未运行";
+  return { success: "成功", failed: "失败", running: "运行中", stopped: "已停止" }[status] || "未运行";
 }
 
 function triggerText(trigger: string) {

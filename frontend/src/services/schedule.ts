@@ -208,6 +208,11 @@ export async function runScheduleJob(id: number): Promise<string> {
   return (result as { message?: string }).message || "已触发运行";
 }
 
+export async function stopScheduleJob(id: number): Promise<string> {
+  const result = await send(`/api/schedule/jobs/${id}/stop`, "POST");
+  return (result as { message?: string }).message || "已请求停止";
+}
+
 export async function listScheduleRunStates(): Promise<ScheduleRunState[]> {
   const response = await fetch("/api/schedule/run-states");
   if (!response.ok) throw new Error(await readError(response));

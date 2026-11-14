@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import AppLayout from "@/layouts/AppLayout.vue";
+import DailyReview from "@/pages/DailyReview.vue";
 import Instrument from "@/pages/Instrument.vue";
 import Login from "@/pages/Login.vue";
 import Market from "@/pages/Market.vue";
@@ -19,6 +20,7 @@ export const router = createRouter({
         { path: "", redirect: "/market" },
         { path: "market", name: "market", component: Market },
         { path: "research", name: "research", component: Instrument },
+        { path: "review", name: "review", component: DailyReview },
         { path: "instrument/:code", name: "instrument", component: Instrument },
         { path: "sync", name: "sync", component: Sync },
         { path: "schedule", name: "schedule", component: Schedule },

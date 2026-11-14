@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import ApiTree from "@/components/sync/ApiTree.vue";
-import { tushareCatalog } from "@/data/tushareCatalog";
+import { tushareCatalog, type CatalogNode } from "@/data/tushareCatalog";
 import {
   CRON_PRESETS,
   createScheduleJob,
@@ -53,6 +53,7 @@ const form = reactive({
 });
 const cronPreset = ref("0 8 * * *");
 const detailTab = ref<"schedule" | "params" | "fields">("schedule");
+const autoName = ref("");
 
 const selectedFields = computed(() =>
   schema.value ? schema.value.fields.filter((field) => checks[field.name]).map((field) => field.name) : [],
@@ -106,6 +107,7 @@ onMounted(() => {
     const prefill = props.prefill;
     if (prefill.source) form.source = prefill.source;
     activeId.value = docId;
+    applySelectedName(docId);
     void loadSchema(docId, () => {
       Object.assign(drafts, prefill.params ?? {});
       const wanted = new Set(prefill.fields ?? []);
@@ -113,7 +115,6 @@ onMounted(() => {
         for (const field of schema.value?.fields ?? []) checks[field.name] = wanted.has(field.name);
       }
       if (schema.value) {
-        form.name = form.name || schema.value.title;
         form.targetTable = form.targetTable || schema.value.apiName;
       }
     });
@@ -124,12 +125,33 @@ function toggle(id: string) {
   expanded[id] = !expanded[id];
 }
 
+function catalogTitleOf(id: string, nodes: CatalogNode[] = tushareCatalog): string {
+  for (const node of nodes) {
+    if (node.id === id) return node.title;
+    if (node.children?.length) {
+      const found = catalogTitleOf(id, node.children);
+      if (found) return found;
+    }
+  }
+  return "";
+}
+
+function applySelectedName(id: string) {
+  if (props.job) return;
+  const title = catalogTitleOf(id);
+  if (!title) return;
+  if (!form.name.trim() || form.name === autoName.value) {
+    form.name = title;
+  }
+  autoName.value = title;
+}
+
 function selectApi(id: string) {
   if (loading.value) return;
   activeId.value = id;
+  applySelectedName(id);
   void loadSchema(id, () => {
     if (!props.job && schema.value) {
-      form.name = form.name || schema.value.title;
       form.targetTable = schema.value.apiName;
     }
   });
